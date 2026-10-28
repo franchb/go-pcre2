@@ -26,7 +26,7 @@ If your patterns work in `regexp` or `regexp2`, use those. They are faster to ca
 2. Build the 8-bit library with wasi-sdk, JIT off. PCRE2's JIT has no WebAssembly backend.
 3. Link a reactor module that exports only the functions in [`exports.txt`](buildtools/wasm/exports.txt) and its memory.
 4. Fail the build if the module imports anything. With no imports, the module cannot reach files, clocks, the network or the process, whatever the pattern or subject.
-5. Translate the module to Go with the pinned wasm2go version, and record the inputs and the `.wasm` SHA-256 in `internal/wasm/versions.go`.
+5. Translate the module to Go with the pinned wasm2go version and its `-unsafe` option, and record the inputs and the `.wasm` SHA-256 in `internal/wasm/versions.go`. With `-unsafe` the generated code uses `unsafe.Pointer` loads and stores; wasm2go's README says it follows the `unsafe.Pointer` rules and that every access is still bounds-checked.
 
 CI regenerates on every run and fails if the result differs from what is committed.
 

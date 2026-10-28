@@ -6,6 +6,8 @@ import (
 	"encoding/binary"
 	"math"
 	"math/bits"
+	"runtime"
+	"unsafe"
 )
 
 type Module struct {
@@ -55258,6 +55260,113 @@ func (m *Module) Xmemory() Memory {
 	return &m.wasmMemory
 }
 
+// Compiler error if endianess is unknown.
+var _ = map[bool]struct{}{big: {}, little: {}}
+
+// go.dev/src/cmd/compile/internal/ssa/config.go
+const (
+	big = false ||
+		runtime.GOARCH == "ppc64" || runtime.GOARCH == "s390x" ||
+		runtime.GOARCH == "mips" || runtime.GOARCH == "mips64"
+
+	little = false ||
+		runtime.GOARCH == "386" || runtime.GOARCH == "amd64" ||
+		runtime.GOARCH == "arm" || runtime.GOARCH == "arm64" ||
+		runtime.GOARCH == "riscv64" || runtime.GOARCH == "wasm" ||
+		runtime.GOARCH == "ppc64le" || runtime.GOARCH == "loong64" ||
+		runtime.GOARCH == "mipsle" || runtime.GOARCH == "mips64le"
+
+	unalignedOK = false ||
+		runtime.GOARCH == "386" || runtime.GOARCH == "amd64" ||
+		runtime.GOARCH == "arm64" || runtime.GOARCH == "loong64" ||
+		runtime.GOARCH == "ppc64" || runtime.GOARCH == "ppc64le" ||
+		runtime.GOARCH == "s390x" || runtime.GOARCH == "wasm"
+)
+
+//go:nosplit
+func load16[T uint32 | uint64](mem []byte, addr T) uint16 {
+	if !unalignedOK {
+		a := uint64(addr)
+		return binary.LittleEndian.Uint16(mem[:0:len(mem)][a : a+2 : a+2])
+	}
+	_ = mem[uint64(addr)+1]
+	val := *(*uint16)(unsafe.Add(unsafe.Pointer(unsafe.SliceData(mem)), uintptr(addr)))
+	if big {
+		return bits.ReverseBytes16(val)
+	}
+	return val
+}
+
+//go:nosplit
+func store16[T uint32 | uint64](mem []byte, addr T, val uint16) {
+	if !unalignedOK {
+		a := uint64(addr)
+		binary.LittleEndian.PutUint16(mem[:0:len(mem)][a:a+2:a+2], val)
+		return
+	}
+	if big {
+		val = bits.ReverseBytes16(val)
+	}
+	_ = mem[uint64(addr)+1]
+	*(*uint16)(unsafe.Add(unsafe.Pointer(unsafe.SliceData(mem)), uintptr(addr))) = val
+}
+
+//go:nosplit
+func load32[T uint32 | uint64](mem []byte, addr T) uint32 {
+	if !unalignedOK {
+		a := uint64(addr)
+		return binary.LittleEndian.Uint32(mem[:0:len(mem)][a : a+4 : a+4])
+	}
+	_ = mem[uint64(addr)+3]
+	val := *(*uint32)(unsafe.Add(unsafe.Pointer(unsafe.SliceData(mem)), uintptr(addr)))
+	if big {
+		return bits.ReverseBytes32(val)
+	}
+	return val
+}
+
+//go:nosplit
+func store32[T uint32 | uint64](mem []byte, addr T, val uint32) {
+	if !unalignedOK {
+		a := uint64(addr)
+		binary.LittleEndian.PutUint32(mem[:0:len(mem)][a:a+4:a+4], val)
+		return
+	}
+	if big {
+		val = bits.ReverseBytes32(val)
+	}
+	_ = mem[uint64(addr)+3]
+	*(*uint32)(unsafe.Add(unsafe.Pointer(unsafe.SliceData(mem)), uintptr(addr))) = val
+}
+
+//go:nosplit
+func load64[T uint32 | uint64](mem []byte, addr T) uint64 {
+	if !unalignedOK {
+		a := uint64(addr)
+		return binary.LittleEndian.Uint64(mem[:0:len(mem)][a : a+8 : a+8])
+	}
+	_ = mem[uint64(addr)+7]
+	val := *(*uint64)(unsafe.Add(unsafe.Pointer(unsafe.SliceData(mem)), uintptr(addr)))
+	if big {
+		return bits.ReverseBytes64(val)
+	}
+	return val
+}
+
+//go:nosplit
+func store64[T uint32 | uint64](mem []byte, addr T, val uint64) {
+	if !unalignedOK {
+		a := uint64(addr)
+		binary.LittleEndian.PutUint64(mem[:0:len(mem)][a:a+8:a+8], val)
+		return
+	}
+	if big {
+		val = bits.ReverseBytes64(val)
+	}
+	_ = mem[uint64(addr)+7]
+	*(*uint64)(unsafe.Add(unsafe.Pointer(unsafe.SliceData(mem)), uintptr(addr))) = val
+}
+
 //go:nosplit
 func i32(x int32) int32 { return x }
 
@@ -55287,42 +55396,6 @@ func i32_rotl(x, y int32) int32 {
 //go:nosplit
 func i64_rotl(x, y int64) int64 {
 	return int64(bits.RotateLeft64(uint64(x), int(y)))
-}
-
-//go:nosplit
-func load16[T uint32 | uint64](mem []byte, addr T) uint16 {
-	a := uint64(addr)
-	return binary.LittleEndian.Uint16(mem[:0:len(mem)][a : a+2 : a+2])
-}
-
-//go:nosplit
-func store16[T uint32 | uint64](mem []byte, addr T, val uint16) {
-	a := uint64(addr)
-	binary.LittleEndian.PutUint16(mem[:0:len(mem)][a:a+2:a+2], val)
-}
-
-//go:nosplit
-func load32[T uint32 | uint64](mem []byte, addr T) uint32 {
-	a := uint64(addr)
-	return binary.LittleEndian.Uint32(mem[:0:len(mem)][a : a+4 : a+4])
-}
-
-//go:nosplit
-func store32[T uint32 | uint64](mem []byte, addr T, val uint32) {
-	a := uint64(addr)
-	binary.LittleEndian.PutUint32(mem[:0:len(mem)][a:a+4:a+4], val)
-}
-
-//go:nosplit
-func load64[T uint32 | uint64](mem []byte, addr T) uint64 {
-	a := uint64(addr)
-	return binary.LittleEndian.Uint64(mem[:0:len(mem)][a : a+8 : a+8])
-}
-
-//go:nosplit
-func store64[T uint32 | uint64](mem []byte, addr T, val uint64) {
-	a := uint64(addr)
-	binary.LittleEndian.PutUint64(mem[:0:len(mem)][a:a+8:a+8], val)
 }
 
 func memory_grow(mem *[]byte, delta, max int64) int64 {

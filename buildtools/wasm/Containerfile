@@ -58,7 +58,7 @@ WORKDIR /build
 SHELL ["/bin/bash", "-c"]
 
 RUN . ./versions.env \
-  && go run "github.com/ncruces/wasm2go@${WASM2GO_VERSION}" -pkg=wasm -o pcre2.wasm.go pcre2.wasm \
+  && go run "github.com/ncruces/wasm2go@${WASM2GO_VERSION}" -unsafe -pkg=wasm -o pcre2.wasm.go pcre2.wasm \
   && pcre2_version="${PCRE2_TAG#pcre2-}" \
   && sum="$(sha256sum pcre2.wasm | cut -d' ' -f1)" \
   && printf '%s\n' \
