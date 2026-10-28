@@ -1,0 +1,76 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    permissions:
+      # Lets the job commit regenerated code back to a same-repo PR branch.
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.ref || github.ref }}
+          repository: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
+
+      - name: Generate PCRE2 Wasm and wasm2go output
+        run: make generate CONTAINER=docker VOLUME_OPTS=
+
+      # The generated files must match what is committed. On a PR from this
+      # repository the job commits them instead, which is how the first
+      # build and every PCRE2 or wasm2go bump get their generated code.
+      - name: Check generated code
+        env:
+          SAME_REPO: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository }}
+        run: |
+          if [ -z "$(git status --porcelain internal/wasm)" ]; then
+            echo "generated code is up to date"
+          elif [ "$SAME_REPO" = "true" ]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add internal/wasm
+            git commit -m "chore: regenerate internal/wasm"
+            git push
+          else
+            git status --porcelain internal/wasm
+            echo "::error::internal/wasm is out of date; run make generate" >&2
+            exit 1
+          fi
+
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version-file: go.mod
+
+      - name: Format
+        run: test -z "$(gofmt -l $(git ls-files '*.go' | grep -v '^internal/wasm/pcre2.wasm.go$'))"
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Test
+        run: go test -race ./...
+
+      - name: Build without cgo for other platforms
+        run: |
+          for target in linux/arm64 darwin/arm64 windows/amd64 linux/riscv64; do
+            CGO_ENABLED=0 GOOS="${target%/*}" GOARCH="${target#*/}" go build ./...
+          done
+
+      - name: Benchmarks
+        working-directory: bench
+        run: |
+          go test ./...
+          go test -run '^$' -bench . -benchmem -count 5 | tee bench.txt
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: bench
+          path: bench/bench.txt

@@ -1,0 +1,16 @@
+malloc
+free
+pcre2_compile_8
+pcre2_code_free_8
+pcre2_get_error_message_8
+pcre2_pattern_info_8
+pcre2_match_data_create_from_pattern_8
+pcre2_match_data_free_8
+pcre2_get_ovector_pointer_8
+pcre2_get_ovector_count_8
+pcre2_match_context_create_8
+pcre2_match_context_free_8
+pcre2_set_match_limit_8
+pcre2_set_depth_limit_8
+pcre2_set_heap_limit_8
+pcre2_match_8
