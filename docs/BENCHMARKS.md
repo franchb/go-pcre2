@@ -22,8 +22,8 @@ Throughput in MB/s; the "small" row is ns per call.
 What the table shows:
 - **Translation cost.** Against the same PCRE2 interpreter compiled natively, wasm2go costs 1.5× to 2.5×.
 - **The JIT** is a separate multiplier on top: 1.5× to 6.1× on these patterns.
-- **go-pcre2 vs regexp2.** go-pcre2 beats regexp2 on the price and backreference patterns, ties on lookbehind, and loses on the email pattern, which tries a match at almost every position.
-- **Literal search.** Go's engines answer `needle` with a vectorized `bytes.Index`; PCRE2 cannot.
+- **go-pcre2 vs regexp2.** go-pcre2 beats regexp2 on the price and backreference patterns, ties on lookbehind, and loses on the email pattern. On that pattern regexp2 also beats PCRE2's own native interpreter.
+- **Literal search.** Both Go engines are far ahead on the `needle` search. I haven't profiled why; a literal-prefix fast path is the likely explanation.
 
 ## History
 
