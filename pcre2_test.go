@@ -9,8 +9,10 @@ import (
 )
 
 func TestVersion(t *testing.T) {
-	if Version != "10.49" {
-		t.Errorf("Version = %q, want 10.49", Version)
+	// The wasm2go build is pinned; the cgo build reports whatever PCRE2
+	// it is linked against.
+	if Backend == "wasm2go" && Version != "10.49" || Version == "" {
+		t.Errorf("Version = %q (backend %s), want 10.49", Version, Backend)
 	}
 }
 

@@ -1,3 +1,4 @@
 bench/bench.txt
 *.test
 *.out
+bench/bench-cgo.txt

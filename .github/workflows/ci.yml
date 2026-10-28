@@ -74,3 +74,37 @@ jobs:
         with:
           name: bench
           path: bench/bench.txt
+
+  # The same suite and benchmarks against native PCRE2 with the JIT, built
+  # from the same pinned commit. This is the baseline the wasm2go numbers
+  # are compared with.
+  cgo:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Build native PCRE2 with JIT
+        run: |
+          PREFIX="$RUNNER_TEMP/pcre2" buildtools/native/build.sh
+          echo "PKG_CONFIG_PATH=$RUNNER_TEMP/pcre2/lib/pkgconfig" >> "$GITHUB_ENV"
+
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version-file: go.mod
+
+      - name: Vet
+        run: go vet -tags pcre2_cgo ./...
+
+      - name: Test
+        run: go test -race -tags pcre2_cgo ./...
+
+      - name: Benchmarks
+        working-directory: bench
+        run: |
+          go test -tags pcre2_cgo ./...
+          go test -tags pcre2_cgo -run '^$' -bench . -benchmem -count 5 | tee bench-cgo.txt
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: bench-cgo
+          path: bench/bench-cgo.txt

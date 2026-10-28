@@ -58,9 +58,22 @@ A `Regexp` is safe for concurrent use. Each goroutine matching at the same time 
 
 Each release is built from one PCRE2 release; `pcre2.Version` reports which. The plan is to release alongside every PCRE2 version, with the bump PR opened automatically.
 
+## cgo backend
+
+Building with `-tags pcre2_cgo` swaps the wasm2go backend for cgo bindings to a native PCRE2 with the JIT. The API is identical; `pcre2.Backend` says which one is in use, and `pcre2.JIT` whether the JIT is available. It exists mainly as the baseline for benchmarks, and for programs that can use cgo but want the same API. [`buildtools/native/build.sh`](buildtools/native/build.sh) builds the same pinned PCRE2 commit natively:
+
+```bash
+PREFIX=$HOME/.local/pcre2 buildtools/native/build.sh
+```
+
+```bash
+PKG_CONFIG_PATH=$HOME/.local/pcre2/lib/pkgconfig go test -tags pcre2_cgo ./...
+```
+
+The JIT ignores `DepthLimit` and `HeapLimit`; `MatchLimit` still applies.
+
 ## Roadmap
 
-- A cgo backend behind a build tag, linking the system PCRE2 with the JIT, so the same benchmarks can compare against native PCRE2.
 - A scheduled workflow that opens a PR when PCRE2 tags a release.
 - Callouts, which need a host import and so a deliberate decision about the no-imports rule.
 

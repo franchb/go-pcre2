@@ -3,6 +3,7 @@
 // never appears in go-pcre2's own go.mod.
 //
 //	cd bench && go test -run '^$' -bench . -benchmem
+//	cd bench && go test -tags pcre2_cgo -run '^$' -bench . -benchmem  # native PCRE2 + JIT
 package bench
 
 import (
@@ -52,7 +53,7 @@ func re2(pattern string) engine {
 
 func pcre(pattern string) engine {
 	re := pcre2.MustCompile(pattern)
-	return engine{"pcre2", func(s string) (int, error) {
+	return engine{"pcre2-" + pcre2.Backend, func(s string) (int, error) {
 		all, err := re.FindAllStringIndex(s, -1)
 		return len(all), err
 	}}
@@ -132,7 +133,7 @@ func BenchmarkSmall(b *testing.B) {
 			}
 		}
 	})
-	b.Run("pcre2", func(b *testing.B) {
+	b.Run("pcre2-"+pcre2.Backend, func(b *testing.B) {
 		for b.Loop() {
 			if ok, err := pc.MatchString(subject); !ok || err != nil {
 				b.Fatal(ok, err)
