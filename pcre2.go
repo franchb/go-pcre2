@@ -22,6 +22,7 @@ package pcre2
 import (
 	"errors"
 	"sync"
+	"unicode/utf8"
 )
 
 const (
@@ -221,7 +222,29 @@ func find[T subject](re *Regexp, s T, start int, opts uint32) (loc []int, err er
 	}
 	defer re.put(in, &err)
 	load(in, s)
-	return in.match(len(s), start, opts)
+	return in.match(len(s), start, opts|utfCheck(re, s))
+}
+
+// utfCheck returns PCRE2_NO_UTF_CHECK when PCRE2's own UTF-8 check can be
+// skipped: Go's utf8.Valid is much faster than PCRE2's byte-at-a-time
+// validator, which dominated simple matches on long subjects. If the
+// subject is invalid, PCRE2 still runs its check, so the error it returns
+// (code and offset) is unchanged. Under PCRE2_MATCH_INVALID_UTF the flag
+// is ignored, so there is no point validating.
+func utfCheck[T subject](re *Regexp, s T) uint32 {
+	if re.cfg.flags&(optUTF|optMatchInvalidUTF) != optUTF {
+		return 0
+	}
+	var valid bool
+	if b, ok := any(s).([]byte); ok {
+		valid = utf8.Valid(b)
+	} else {
+		valid = utf8.ValidString(string(s))
+	}
+	if valid {
+		return matchNoUTFCheck
+	}
+	return 0
 }
 
 func findAll[T subject](re *Regexp, s T, n int) (all [][]int, err error) {
@@ -235,10 +258,9 @@ func findAll[T subject](re *Regexp, s T, n int) (all [][]int, err error) {
 	defer re.put(in, &err)
 	load(in, s)
 
-	// The first call validates the whole subject as UTF-8; later calls
-	// start on character boundaries, so they can skip the check. PCRE2
-	// ignores the flag under PCRE2_MATCH_INVALID_UTF.
-	var noCheck uint32
+	// Once the subject is known to be valid, every call can skip PCRE2's
+	// check: later calls start on character boundaries.
+	noCheck := utfCheck(re, s)
 	start, opts := 0, uint32(0)
 	for start <= len(s) && (n < 0 || len(all) < n) {
 		loc, err := in.match(len(s), start, opts|noCheck)

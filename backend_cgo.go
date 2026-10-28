@@ -109,7 +109,9 @@ func (re *Regexp) newInstance() (*instance, error) {
 	if code == nil {
 		return nil, &CompileError{Pattern: re.expr, Offset: int(erroff), Code: int(errcode), Message: errorMessage(int32(errcode))}
 	}
-	C.gp_jit(code) // non-zero means the JIT declined; the interpreter is used
+	if !re.cfg.noJIT {
+		C.gp_jit(code) // non-zero means the JIT declined; the interpreter is used
+	}
 
 	in := &instance{code: code}
 	in.md = C.pcre2_match_data_create_from_pattern_8(code, nil)
