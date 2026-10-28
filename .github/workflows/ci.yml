@@ -13,8 +13,10 @@ jobs:
   build:
     runs-on: ubuntu-24.04
     permissions:
-      # Lets the job commit regenerated code back to a same-repo PR branch.
+      # Lets the job commit regenerated code back to a same-repo PR branch,
+      # and start CI again on that commit.
       contents: write
+      actions: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -30,6 +32,8 @@ jobs:
       - name: Check generated code
         env:
           SAME_REPO: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository }}
+          BRANCH: ${{ github.head_ref }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           if [ -z "$(git status --porcelain internal/wasm)" ]; then
             echo "generated code is up to date"
@@ -39,6 +43,9 @@ jobs:
             git add internal/wasm
             git commit -m "chore: regenerate internal/wasm"
             git push
+            # A push made with GITHUB_TOKEN starts no workflow, and the other
+            # jobs in this run tested the old code. Run CI on the new head.
+            gh workflow run ci.yml --ref "$BRANCH"
           else
             git status --porcelain internal/wasm
             echo "::error::internal/wasm is out of date; run make generate" >&2

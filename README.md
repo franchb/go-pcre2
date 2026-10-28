@@ -56,7 +56,11 @@ A `Regexp` is safe for concurrent use. Each goroutine matching at the same time 
 
 ## Versions
 
-Each release is built from one PCRE2 release; `pcre2.Version` reports which. The plan is to release alongside every PCRE2 version, with the bump PR opened automatically.
+Each release is built from one PCRE2 release, and the module version says which: `v0.49.x` is PCRE2 10.49. `pcre2.Version` reports it at run time.
+
+- [`pcre2-release.yml`](.github/workflows/pcre2-release.yml) checks PCRE2's tags daily. When a newer release appears, it opens a PR that bumps the pin and carries the regenerated code, then starts CI on it.
+- [`release.yml`](.github/workflows/release.yml) tags `v0.MINOR.0` and publishes a GitHub release when a pin change lands on `main`.
+- Wrapper-only fixes are released by hand as `v0.MINOR.PATCH`.
 
 ## cgo backend
 
@@ -74,7 +78,6 @@ The JIT ignores `DepthLimit` and `HeapLimit`; `MatchLimit` still applies.
 
 ## Roadmap
 
-- A scheduled workflow that opens a PR when PCRE2 tags a release.
 - Callouts, which need a host import and so a deliberate decision about the no-imports rule.
 
 ## License
