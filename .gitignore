@@ -1,3 +1,3 @@
-bench/bench.txt
+bench/bench-*.txt
 *.test
 *.out

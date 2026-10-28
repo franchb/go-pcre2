@@ -33,7 +33,7 @@ CI regenerates on every run and fails if the result differs from what is committ
 ## Behaviour
 
 - Offsets are byte offsets, as in `regexp`.
-- Patterns and subjects are UTF-8 by default. Invalid UTF-8 in a subject fails to match rather than returning an error (`PCRE2_MATCH_INVALID_UTF`). Use `Bytes()` to match raw bytes.
+- Patterns and subjects are UTF-8 by default, and an invalid UTF-8 subject returns a `*MatchError`. `InvalidUTF()` makes invalid sequences fail to match instead, at the cost of PCRE2 re-validating the rest of the subject on every match call, which makes `FindAll` quadratic on long inputs. `Bytes()` matches raw bytes.
 - `\d`, `\w`, `\s` are ASCII unless `UCP()` is set, as in `regexp`.
 - Match methods return an `error`, because a backtracking match can hit a limit.
 - `FindAll*` follows Perl after an empty match: the next attempt at the same position must be non-empty, and if that fails the search moves on one character. Go's `regexp` instead never reports an empty match right after a previous match, so `a*` on `"baaab"` gives four matches here and three there.
@@ -58,9 +58,22 @@ A `Regexp` is safe for concurrent use. Each goroutine matching at the same time 
 
 Each release is built from one PCRE2 release; `pcre2.Version` reports which. The plan is to release alongside every PCRE2 version, with the bump PR opened automatically.
 
+## cgo backend
+
+Building with `-tags pcre2_cgo` swaps the wasm2go backend for cgo bindings to a native PCRE2 with the JIT. The API is identical; `pcre2.Backend` says which one is in use, and `pcre2.JIT` whether the JIT is available. It exists mainly as the baseline for benchmarks, and for programs that can use cgo but want the same API. [`buildtools/native/build.sh`](buildtools/native/build.sh) builds the same pinned PCRE2 commit natively:
+
+```bash
+PREFIX=$HOME/.local/pcre2 buildtools/native/build.sh
+```
+
+```bash
+PKG_CONFIG_PATH=$HOME/.local/pcre2/lib/pkgconfig go test -tags pcre2_cgo ./...
+```
+
+The JIT ignores `DepthLimit` and `HeapLimit`; `MatchLimit` still applies.
+
 ## Roadmap
 
-- A cgo backend behind a build tag, linking the system PCRE2 with the JIT, so the same benchmarks can compare against native PCRE2.
 - A scheduled workflow that opens a PR when PCRE2 tags a release.
 - Callouts, which need a host import and so a deliberate decision about the no-imports rule.
 
