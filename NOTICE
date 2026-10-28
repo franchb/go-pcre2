@@ -1,0 +1,15 @@
+go-pcre2 includes code generated from third-party software.
+
+internal/wasm/pcre2.wasm.go is a translation, by wasm2go, of a WebAssembly
+build of:
+
+- PCRE2 (https://github.com/PCRE2Project/pcre2), distributed under
+  BSD-3-Clause WITH PCRE2-exception. The full licence is in
+  LICENSES/PCRE2-LICENCE.md. The PCRE2 JIT is not included in this build.
+
+- wasi-libc (https://github.com/WebAssembly/wasi-libc), as shipped in wasi-sdk
+  25, for the C library functions PCRE2 uses (malloc, free, memcpy and
+  similar). See that project's LICENSE files for its terms.
+
+wasm2go (https://github.com/ncruces/wasm2go) is used at build time only; its
+output carries no wasm2go runtime.
