@@ -16,6 +16,7 @@ type config struct {
 	matchLimit uint32 // 0 means the PCRE2 default
 	depthLimit uint32
 	heapLimit  uint32 // KiB
+	noJIT      bool
 }
 
 func defaultConfig() config {
@@ -68,3 +69,8 @@ func DepthLimit(n uint32) Option { return func(c *config) { c.depthLimit = n } }
 // HeapLimit caps the heap memory, in KiB, that one match may use to hold
 // backtracking information. Exceeding it returns ErrHeapLimit.
 func HeapLimit(kib uint32) Option { return func(c *config) { c.heapLimit = kib } }
+
+// NoJIT makes the cgo backend use PCRE2's interpreter instead of its JIT.
+// It exists to measure what the JIT contributes; the wasm2go backend never
+// has a JIT and ignores it.
+func NoJIT() Option { return func(c *config) { c.noJIT = true } }

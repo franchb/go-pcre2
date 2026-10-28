@@ -70,8 +70,21 @@ var cases = []struct {
 	{"no-match-literal", `needle`, true},
 }
 
+func pcreNoJIT(pattern string) engine {
+	re := pcre2.MustCompile(pattern, pcre2.NoJIT())
+	return engine{"pcre2-" + pcre2.Backend + "-interp", func(s string) (int, error) {
+		all, err := re.FindAllStringIndex(s, -1)
+		return len(all), err
+	}}
+}
+
 func engines(pattern string, withStdlib bool) []engine {
 	es := []engine{re2(pattern), pcre(pattern)}
+	if pcre2.Backend == "cgo" {
+		// Native PCRE2 without its JIT: the same interpreter the wasm2go
+		// build runs, so the gap to wasm2go is the cost of translation.
+		es = append(es, pcreNoJIT(pattern))
+	}
 	if withStdlib {
 		es = append([]engine{stdlib(pattern)}, es...)
 	}
@@ -119,6 +132,7 @@ func BenchmarkSmall(b *testing.B) {
 	std := regexp.MustCompile(pattern)
 	r2 := regexp2.MustCompile(pattern)
 	pc := pcre2.MustCompile(pattern)
+	pi := pcre2.MustCompile(pattern, pcre2.NoJIT())
 	b.Run("stdlib", func(b *testing.B) {
 		for b.Loop() {
 			if !std.MatchString(subject) {
@@ -140,4 +154,13 @@ func BenchmarkSmall(b *testing.B) {
 			}
 		}
 	})
+	if pcre2.Backend == "cgo" {
+		b.Run("pcre2-cgo-interp", func(b *testing.B) {
+			for b.Loop() {
+				if ok, err := pi.MatchString(subject); !ok || err != nil {
+					b.Fatal(ok, err)
+				}
+			}
+		})
+	}
 }
