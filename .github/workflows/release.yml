@@ -1,0 +1,45 @@
+name: Release
+
+# go-pcre2 versions follow PCRE2: v0.MINOR.PATCH is built from PCRE2
+# 10.MINOR. When a change to the pin lands on main, tag v0.MINOR.0 (if it
+# does not exist yet) and publish a GitHub release. Wrapper-only changes
+# are released by hand as v0.MINOR.PATCH.
+
+on:
+  push:
+    branches: [main]
+    paths: [buildtools/wasm/versions.env]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  tag:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Tag and release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          . buildtools/wasm/versions.env
+          version="${PCRE2_TAG#pcre2-}"          # 10.49
+          case "$version" in
+            10.*) ;;
+            *) echo "::error::versioning assumes PCRE2 10.x, got $version"; exit 1 ;;
+          esac
+          tag="v0.${version#10.}.0"              # v0.49.0
+          if git rev-parse -q --verify "refs/tags/$tag" >/dev/null; then
+            echo "$tag already exists"
+            exit 0
+          fi
+          git tag "$tag"
+          git push origin "$tag"
+          gh release create "$tag" --title "$tag (PCRE2 $version)" --notes \
+            "Built from PCRE2 $version, commit \`$PCRE2_COMMIT\`, translated with wasm2go $WASM2GO_VERSION."

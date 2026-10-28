@@ -1,0 +1,74 @@
+name: PCRE2 release watcher
+
+# Daily: if PCRE2 has tagged a newer release than versions.env pins, open a
+# PR that bumps the pin and carries the regenerated code, then start CI on
+# it. PRs opened with GITHUB_TOKEN do not trigger pull_request workflows,
+# but workflow_dispatch is exempt, so CI is dispatched explicitly.
+
+on:
+  schedule:
+    - cron: "17 5 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+      pull-requests: write
+      actions: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Compare pinned and latest PCRE2
+        id: cmp
+        run: |
+          . buildtools/wasm/versions.env
+          read -r tag commit < <(buildtools/pcre2-latest.sh)
+          echo "pinned $PCRE2_TAG, latest $tag ($commit)"
+          newest="$(printf '%s\n%s\n' "$PCRE2_TAG" "$tag" | sort -V | tail -1)"
+          if [ "$tag" = "$PCRE2_TAG" ] || [ "$newest" != "$tag" ]; then
+            echo "up to date"
+            exit 0
+          fi
+          branch="pcre2/$tag"
+          if git ls-remote --exit-code --heads origin "$branch" >/dev/null; then
+            echo "branch $branch already exists"
+            exit 0
+          fi
+          {
+            echo "tag=$tag"
+            echo "commit=$commit"
+            echo "branch=$branch"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Bump pin and regenerate
+        if: steps.cmp.outputs.tag != ''
+        env:
+          TAG: ${{ steps.cmp.outputs.tag }}
+          COMMIT: ${{ steps.cmp.outputs.commit }}
+        run: |
+          sed -i "s/^PCRE2_TAG=.*/PCRE2_TAG=$TAG/; s/^PCRE2_COMMIT=.*/PCRE2_COMMIT=$COMMIT/" buildtools/wasm/versions.env
+          sed -i "s/Version != \"10\.[0-9]*\"/Version != \"${TAG#pcre2-}\"/; s/want 10\.[0-9]*\"/want ${TAG#pcre2-}\"/" pcre2_test.go
+          make generate CONTAINER=docker VOLUME_OPTS=
+
+      - name: Open PR and start CI
+        if: steps.cmp.outputs.tag != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.cmp.outputs.tag }}
+          BRANCH: ${{ steps.cmp.outputs.branch }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -b "$BRANCH"
+          git add buildtools/wasm/versions.env pcre2_test.go internal/wasm
+          git commit -m "build: bump PCRE2 to ${TAG#pcre2-}"
+          git push -u origin "$BRANCH"
+          gh pr create --base main --head "$BRANCH" \
+            --title "build: bump PCRE2 to ${TAG#pcre2-}" \
+            --body "PCRE2 tagged \`$TAG\` upstream. This PR updates the pin in \`buildtools/wasm/versions.env\` and carries the regenerated \`internal/wasm\`. Check the PCRE2 ChangeLog before merging. Merging tags a release (see release.yml)."
+          gh workflow run ci.yml --ref "$BRANCH"
