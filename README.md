@@ -33,7 +33,7 @@ CI regenerates on every run and fails if the result differs from what is committ
 ## Behaviour
 
 - Offsets are byte offsets, as in `regexp`.
-- Patterns and subjects are UTF-8 by default. Invalid UTF-8 in a subject fails to match rather than returning an error (`PCRE2_MATCH_INVALID_UTF`). Use `Bytes()` to match raw bytes.
+- Patterns and subjects are UTF-8 by default, and an invalid UTF-8 subject returns a `*MatchError`. `InvalidUTF()` makes invalid sequences fail to match instead, at the cost of PCRE2 re-validating the rest of the subject on every match call, which makes `FindAll` quadratic on long inputs. `Bytes()` matches raw bytes.
 - `\d`, `\w`, `\s` are ASCII unless `UCP()` is set, as in `regexp`.
 - Match methods return an `error`, because a backtracking match can hit a limit.
 - `FindAll*` follows Perl after an empty match: the next attempt at the same position must be non-empty, and if that fails the search moves on one character. Go's `regexp` instead never reports an empty match right after a previous match, so `a*` on `"baaab"` gives four matches here and three there.

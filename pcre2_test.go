@@ -158,13 +158,26 @@ func TestFindAllEmptyMatches(t *testing.T) {
 }
 
 func TestUTF(t *testing.T) {
-	// Invalid UTF-8 in the subject fails to match instead of erroring.
-	loc, err := MustCompile(`abc`).FindStringIndex("\xffabc")
+	// By default an invalid UTF-8 subject is an error.
+	var me *MatchError
+	if _, err := MustCompile(`abc`).FindStringIndex("\xffabc"); !errors.As(err, &me) {
+		t.Errorf("invalid UTF subject: err = %v, want *MatchError", err)
+	}
+
+	// With InvalidUTF, invalid sequences just fail to match.
+	loc, err := MustCompile(`abc`, InvalidUTF()).FindStringIndex("\xffabc")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if want := []int{1, 4}; !reflect.DeepEqual(loc, want) {
-		t.Errorf("invalid UTF subject: %v, want %v", loc, want)
+		t.Errorf("InvalidUTF: %v, want %v", loc, want)
+	}
+	all, err := MustCompile(`\w+`, InvalidUTF()).FindAllString("ab\xffcd", -1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"ab", "cd"}; !reflect.DeepEqual(all, want) {
+		t.Errorf("InvalidUTF FindAll: %q, want %q", all, want)
 	}
 
 	// Bytes mode: \xff is the single byte 0xff.

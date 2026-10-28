@@ -11,7 +11,9 @@
 // MatchLimit on patterns that see untrusted input, and handle the errors
 // the match methods return.
 //
-// Offsets are byte offsets into the subject, as in Go's regexp.
+// Offsets are byte offsets into the subject, as in Go's regexp. Subjects
+// must be valid UTF-8 unless the pattern was compiled with Bytes or
+// InvalidUTF; otherwise matching returns a *MatchError.
 package pcre2
 
 import (
@@ -39,6 +41,7 @@ const (
 
 	matchNotEmptyAtStart = 0x00000008
 	matchAnchored        = 0x80000000
+	matchNoUTFCheck      = 0x40000000
 
 	unset = 0xffffffff // PCRE2_UNSET in a 32-bit PCRE2_SIZE
 )
@@ -237,12 +240,17 @@ func findAll[T subject](re *Regexp, s T, n int) (all [][]int, err error) {
 	defer re.put(in, &err)
 	load(in, s)
 
+	// The first call validates the whole subject as UTF-8; later calls
+	// start on character boundaries, so they can skip the check. PCRE2
+	// ignores the flag under PCRE2_MATCH_INVALID_UTF.
+	var noCheck uint32
 	start, opts := 0, uint32(0)
 	for start <= len(s) && (n < 0 || len(all) < n) {
-		loc, err := in.match(len(s), start, opts)
+		loc, err := in.match(len(s), start, opts|noCheck)
 		if err != nil {
 			return all, err
 		}
+		noCheck = matchNoUTFCheck
 		if loc == nil {
 			if opts == 0 {
 				break

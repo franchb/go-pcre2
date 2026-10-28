@@ -19,10 +19,7 @@ type config struct {
 }
 
 func defaultConfig() config {
-	// Go strings are UTF-8 by convention but may hold any bytes.
-	// PCRE2_MATCH_INVALID_UTF lets invalid sequences in the subject
-	// fail to match instead of failing the call.
-	return config{flags: optUTF | optMatchInvalidUTF}
+	return config{flags: optUTF}
 }
 
 // An Option changes how a pattern is compiled or matched.
@@ -43,6 +40,15 @@ func Multiline() Option { return func(c *config) { c.flags |= optMultiline } }
 // UCP makes \d, \s, \w and POSIX classes use Unicode properties instead of
 // ASCII. Without it they match ASCII only, as in Go's regexp.
 func UCP() Option { return func(c *config) { c.flags |= optUCP } }
+
+// InvalidUTF lets subjects contain invalid UTF-8: invalid sequences never
+// match, instead of the call returning a *MatchError.
+//
+// It has a cost. PCRE2 then validates the subject from the start offset to
+// the end on every internal match call, so FindAll on a long subject with
+// many matches does quadratic work. Prefer validating once yourself, or
+// Bytes if the input is not text.
+func InvalidUTF() Option { return func(c *config) { c.flags |= optUTF | optMatchInvalidUTF } }
 
 // Bytes treats the pattern and subjects as bytes instead of UTF-8, so a
 // pattern such as \xff matches the single byte 0xff.
