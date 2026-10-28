@@ -64,20 +64,13 @@ jobs:
             CGO_ENABLED=0 GOOS="${target%/*}" GOARCH="${target#*/}" go build ./...
           done
 
-      - name: Benchmarks
+      - name: Benchmark module tests
         working-directory: bench
-        run: |
-          go test ./...
-          go test -run '^$' -bench . -benchmem -count 5 | tee bench.txt
+        run: go test ./...
 
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: bench
-          path: bench/bench.txt
-
-  # The same suite and benchmarks against native PCRE2 with the JIT, built
-  # from the same pinned commit. This is the baseline the wasm2go numbers
-  # are compared with.
+  # The same suite against native PCRE2 with the JIT, built from the same
+  # pinned commit, then the benchmarks for both backends back to back on
+  # this one runner, so the wasm2go numbers have a like-for-like baseline.
   cgo:
     runs-on: ubuntu-24.04
     steps:
@@ -98,13 +91,14 @@ jobs:
       - name: Test
         run: go test -race -tags pcre2_cgo ./...
 
-      - name: Benchmarks
+      - name: Benchmarks, both backends on one runner
         working-directory: bench
         run: |
           go test -tags pcre2_cgo ./...
+          go test -run '^$' -bench . -benchmem -count 5 | tee bench-wasm2go.txt
           go test -tags pcre2_cgo -run '^$' -bench . -benchmem -count 5 | tee bench-cgo.txt
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: bench-cgo
-          path: bench/bench-cgo.txt
+          name: bench
+          path: bench/bench-*.txt
