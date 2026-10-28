@@ -2,7 +2,7 @@
 
 PCRE2 for Go without cgo. PCRE2 is compiled to WebAssembly with wasi-sdk and translated to plain Go with [wasm2go](https://github.com/ncruces/wasm2go). There is no Wasm runtime at run time, and `CGO_ENABLED=0` builds and cross-compiles work like any other Go package.
 
-> Status: experimental. The API may change before v1. Benchmarks are produced by CI and are not published here until they have been reviewed.
+> Status: experimental; the API may change before v1. Benchmarks against `regexp`, regexp2 and native PCRE2 (interpreter and JIT) are in [docs/BENCHMARKS.md](docs/BENCHMARKS.md).
 
 ```go
 import "github.com/franchb/go-pcre2"
