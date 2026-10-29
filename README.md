@@ -29,6 +29,7 @@ all, err := re.FindAllString("f(a, g(b, c)) + (d)", -1)
 - [Versions and releases](#versions-and-releases)
 - [Development](#development)
 - [History](#history)
+- [Roadmap](#roadmap)
 - [License](#license)
 
 ## Install
@@ -281,6 +282,10 @@ All of this was built and measured on 2026-10-28. The first working build ran Fi
 Later, [#7](https://github.com/franchb/go-pcre2/pull/7) stopped allocating offsets a method doesn't return, which took the price pattern to 1.75× regexp2.
 
 The [blog post update](https://franchb.com/posts/pcre-regex-in-go-2026/#update-so-i-built-it) tells the whole story. [docs/BENCHMARKS.md](docs/BENCHMARKS.md) has the numbers at each step.
+
+## Roadmap
+
+- **Fuzzing in CI.** The plan is in [docs/FUZZING.md](docs/FUZZING.md). It aims the fuzz targets at the layers this repository adds on top of PCRE2, which OSS-Fuzz already fuzzes upstream: the wasm2go translation, the wrapper, and the callout path. Its strongest target is differential: wasm2go against native PCRE2 with the JIT off, built from the same commit.
 
 ## License
 
