@@ -285,7 +285,7 @@ The [blog post update](https://franchb.com/posts/pcre-regex-in-go-2026/#update-s
 
 ## Roadmap
 
-- **Fuzzing in CI.** The plan is in [docs/FUZZING.md](docs/FUZZING.md). It aims the fuzz targets at the layers this repository adds on top of PCRE2, which OSS-Fuzz already fuzzes upstream: the wasm2go translation, the wrapper, and the callout path. Its strongest target is differential: wasm2go against native PCRE2 with the JIT off, built from the same commit.
+- **Fuzzing** is in place; see [docs/FUZZING.md](docs/FUZZING.md). Four targets aim at what this repository adds on top of PCRE2, which OSS-Fuzz already fuzzes upstream: the wasm2go translation, the wrapper, and the callout path. One of them, `FuzzDifferential`, compares wasm2go with native PCRE2 built from the same commit, with the JIT off. Every PR fuzzes each target for 30 s or 60 s, and [`fuzz.yml`](.github/workflows/fuzz.yml) runs each for 20 minutes nightly, keeping its corpus in the Actions cache. What remains is to watch the nightly runs and grow the seeds.
 
 ## License
 
