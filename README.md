@@ -250,7 +250,6 @@ The [blog post update](https://franchb.com/posts/pcre-regex-in-go-2026/#update-s
 ## Roadmap
 
 - **Callouts.** They need a host import, so they mean a deliberate decision about the no-imports rule.
-- **A lighter path for very small subjects,** where entering the Wasm module dominates the cost.
 
 ## License
 

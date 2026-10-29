@@ -174,24 +174,15 @@ func errorMessage(code int32) string {
 
 func (in *instance) errorMessage(code int32) string { return errorMessage(code) }
 
-func (in *instance) match(n, start int, opts uint32) ([]int, error) {
+func (in *instance) exec(n, start int, opts uint32) (int, error) {
 	rc := C.gp_match(in.code, in.subj, C.size_t(n), C.size_t(start), C.uint32_t(opts), in.md, in.mctx)
-	if err := matchErr(in, int32(rc)); err != nil || rc == errNoMatch {
-		return nil, err
+	return matchResult(in, int32(rc))
+}
+
+func (in *instance) offsets(rc int, loc []int) {
+	for i, v := range unsafe.Slice(in.ovec, len(loc)) {
+		loc[i] = offset(uint64(v), uint64(^C.size_t(0)), i, rc)
 	}
-	if rc == 0 {
-		rc = C.int(in.npair)
-	}
-	ovec := unsafe.Slice(in.ovec, 2*in.npair)
-	loc := make([]int, 2*in.npair)
-	for i, v := range ovec {
-		if v == ^C.size_t(0) || i >= 2*int(rc) {
-			loc[i] = -1
-		} else {
-			loc[i] = int(v)
-		}
-	}
-	return loc, nil
 }
 
 func (in *instance) groupNames() []string {

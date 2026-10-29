@@ -57,6 +57,41 @@ func TestNoMatch(t *testing.T) {
 	}
 }
 
+// TestIndexWithGroups checks that the methods that read only the whole
+// match return exactly one pair, whatever the number of groups.
+func TestIndexWithGroups(t *testing.T) {
+	re := MustCompile(`(\d+)-(\d+)`)
+	loc, err := re.FindStringIndex("a 1-2 b 33-44")
+	if err != nil || !reflect.DeepEqual(loc, []int{2, 5}) {
+		t.Errorf("FindStringIndex = %v, %v; want [2 5], nil", loc, err)
+	}
+	all, err := re.FindAllStringIndex("a 1-2 b 33-44", -1)
+	if err != nil || !reflect.DeepEqual(all, [][]int{{2, 5}, {8, 13}}) {
+		t.Errorf("FindAllStringIndex = %v, %v; want [[2 5] [8 13]], nil", all, err)
+	}
+	sub, err := re.FindAllStringSubmatchIndex("a 1-2", -1)
+	if err != nil || !reflect.DeepEqual(sub, [][]int{{2, 5, 2, 3, 4, 5}}) {
+		t.Errorf("FindAllStringSubmatchIndex = %v, %v; want [[2 5 2 3 4 5]], nil", sub, err)
+	}
+}
+
+// TestMatchStringAllocs checks that a successful MatchString does not
+// allocate once the pool holds an instance.
+func TestMatchStringAllocs(t *testing.T) {
+	if raceEnabled {
+		t.Skip("sync.Pool drops instances under the race detector")
+	}
+	re := MustCompile(`^\d{4}-\d\d-\d\d$`)
+	n := testing.AllocsPerRun(100, func() {
+		if ok, err := re.MatchString("2026-10-29"); !ok || err != nil {
+			t.Fatal(ok, err)
+		}
+	})
+	if n != 0 {
+		t.Errorf("MatchString allocates %v times per call, want 0", n)
+	}
+}
+
 func TestSubmatches(t *testing.T) {
 	re := MustCompile(`(?<year>\d{4})-(?<month>\d\d)(?:-(?<day>\d\d))?`)
 	if n := re.NumSubexp(); n != 3 {

@@ -119,33 +119,20 @@ func (in *instance) errorMessage(code int32) string {
 	return string(in.mem()[buf : buf+n])
 }
 
-// match runs pcre2_match on the loaded subject of length n.
-func (in *instance) match(n, start int, opts uint32) ([]int, error) {
+// exec runs pcre2_match on the loaded subject of length n. It returns the
+// number of pairs set, or 0 if there is no match.
+func (in *instance) exec(n, start int, opts uint32) (int, error) {
 	rc := in.mod.Xpcre2_match_8(in.code, in.subj, int32(n), int32(start), int32(opts), in.md, in.mctx)
-	if err := matchErr(in, rc); err != nil || rc == errNoMatch {
-		return nil, err
-	}
-	if rc == 0 {
-		// The ovector was too small. It never is, since md is sized from
-		// the pattern, but treat every pair as valid if it happens.
-		rc = int32(in.npair)
-	}
+	return matchResult(in, rc)
+}
 
+// offsets fills loc from the ovector of a match that set rc pairs.
+func (in *instance) offsets(rc int, loc []int) {
 	mem := in.mem()
-	loc := make([]int, 2*in.npair)
 	for i := range loc {
 		v := binary.LittleEndian.Uint32(mem[in.ovec+int32(4*i):])
-		if v == unset {
-			loc[i] = -1
-		} else {
-			loc[i] = int(v)
-		}
+		loc[i] = offset(uint64(v), uint64(unset), i, rc)
 	}
-	// Pairs past rc did not take part in the match.
-	for i := 2 * int(rc); i < len(loc); i++ {
-		loc[i] = -1
-	}
-	return loc, nil
 }
 
 // groupNames reads the capture count and name table of the pattern.

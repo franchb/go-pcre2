@@ -106,39 +106,31 @@ func (re *Regexp) SubexpIndex(name string) int {
 
 // MatchString reports whether s contains a match.
 func (re *Regexp) MatchString(s string) (bool, error) {
-	loc, err := find(re, s, 0, 0)
+	loc, err := find(re, s, pairsNone)
 	return loc != nil, err
 }
 
 // Match reports whether b contains a match.
 func (re *Regexp) Match(b []byte) (bool, error) {
-	loc, err := find(re, b, 0, 0)
+	loc, err := find(re, b, pairsNone)
 	return loc != nil, err
 }
 
 // FindStringIndex returns the start and end of the leftmost match in s, or
 // nil if there is none.
 func (re *Regexp) FindStringIndex(s string) ([]int, error) {
-	loc, err := find(re, s, 0, 0)
-	if loc == nil {
-		return nil, err
-	}
-	return loc[:2], nil
+	return find(re, s, 1)
 }
 
 // FindIndex is FindStringIndex for a byte slice.
 func (re *Regexp) FindIndex(b []byte) ([]int, error) {
-	loc, err := find(re, b, 0, 0)
-	if loc == nil {
-		return nil, err
-	}
-	return loc[:2], nil
+	return find(re, b, 1)
 }
 
 // FindString returns the text of the leftmost match in s, or "" if there is
 // none. Use FindStringIndex to tell an empty match from no match.
 func (re *Regexp) FindString(s string) (string, error) {
-	loc, err := find(re, s, 0, 0)
+	loc, err := find(re, s, 1)
 	if loc == nil {
 		return "", err
 	}
@@ -149,18 +141,18 @@ func (re *Regexp) FindString(s string) (string, error) {
 // its groups: loc[2*i:2*i+2] is group i. Groups that did not take part are
 // -1, -1. It returns nil if there is no match.
 func (re *Regexp) FindStringSubmatchIndex(s string) ([]int, error) {
-	return find(re, s, 0, 0)
+	return find(re, s, pairsAll)
 }
 
 // FindSubmatchIndex is FindStringSubmatchIndex for a byte slice.
 func (re *Regexp) FindSubmatchIndex(b []byte) ([]int, error) {
-	return find(re, b, 0, 0)
+	return find(re, b, pairsAll)
 }
 
 // FindStringSubmatch returns the text of the leftmost match and its groups.
 // Groups that did not take part are "". It returns nil if there is no match.
 func (re *Regexp) FindStringSubmatch(s string) ([]string, error) {
-	loc, err := find(re, s, 0, 0)
+	loc, err := find(re, s, pairsAll)
 	if loc == nil {
 		return nil, err
 	}
@@ -181,28 +173,24 @@ func (re *Regexp) FindStringSubmatch(s string) ([]string, error) {
 // Perl's behaviour, and differs from Go's regexp, which never reports an
 // empty match right after a previous match.
 func (re *Regexp) FindAllStringSubmatchIndex(s string, n int) ([][]int, error) {
-	return findAll(re, s, n)
+	return findAll(re, s, n, pairsAll)
 }
 
 // FindAllSubmatchIndex is FindAllStringSubmatchIndex for a byte slice.
 func (re *Regexp) FindAllSubmatchIndex(b []byte, n int) ([][]int, error) {
-	return findAll(re, b, n)
+	return findAll(re, b, n, pairsAll)
 }
 
 // FindAllStringIndex returns the start and end of up to n successive
 // matches (all of them if n < 0). See FindAllStringSubmatchIndex.
 func (re *Regexp) FindAllStringIndex(s string, n int) ([][]int, error) {
-	all, err := findAll(re, s, n)
-	for i, loc := range all {
-		all[i] = loc[:2]
-	}
-	return all, err
+	return findAll(re, s, n, 1)
 }
 
 // FindAllString returns the text of up to n successive matches (all of them
 // if n < 0). See FindAllStringSubmatchIndex.
 func (re *Regexp) FindAllString(s string, n int) ([]string, error) {
-	all, err := findAll(re, s, n)
+	all, err := findAll(re, s, n, 1)
 	if all == nil {
 		return nil, err
 	}
@@ -215,14 +203,41 @@ func (re *Regexp) FindAllString(s string, n int) ([]string, error) {
 
 type subject interface{ ~string | ~[]byte }
 
-func find[T subject](re *Regexp, s T, start int, opts uint32) (loc []int, err error) {
+// Values for the pairs argument of find and findAll, besides a count.
+const (
+	pairsNone = 0  // report only whether there is a match
+	pairsAll  = -1 // the whole match and every group
+)
+
+// matched is what find returns for pairsNone on a match: non-nil, so that
+// loc != nil still means a match, and shared, so that it costs nothing.
+var matched = []int{}
+
+// find runs one match and returns the first pairs offset pairs of it.
+func find[T subject](re *Regexp, s T, pairs int) (loc []int, err error) {
 	in, err := re.get()
 	if err != nil {
 		return nil, err
 	}
 	defer re.put(in, &err)
 	load(in, s)
-	return in.match(len(s), start, opts|utfCheck(re, s))
+	rc, err := in.exec(len(s), 0, utfCheck(re, s))
+	if rc == 0 {
+		return nil, err
+	}
+	if pairs == pairsNone {
+		return matched, nil
+	}
+	loc = make([]int, 2*clampPairs(pairs, in.npair))
+	in.offsets(rc, loc)
+	return loc, nil
+}
+
+func clampPairs(pairs, npair int) int {
+	if pairs == pairsAll || pairs > npair {
+		return npair
+	}
+	return pairs
 }
 
 // utfCheck returns PCRE2_NO_UTF_CHECK when PCRE2's own UTF-8 check can be
@@ -247,7 +262,7 @@ func utfCheck[T subject](re *Regexp, s T) uint32 {
 	return 0
 }
 
-func findAll[T subject](re *Regexp, s T, n int) (all [][]int, err error) {
+func findAll[T subject](re *Regexp, s T, n, pairs int) (all [][]int, err error) {
 	if n == 0 {
 		return nil, nil
 	}
@@ -258,17 +273,23 @@ func findAll[T subject](re *Regexp, s T, n int) (all [][]int, err error) {
 	defer re.put(in, &err)
 	load(in, s)
 
+	// Matches are cut from shared chunks rather than allocated one by one.
+	// Each is capped at its own length, so appending to one never writes
+	// over the next.
+	width := 2 * clampPairs(pairs, in.npair)
+	var buf []int
+
 	// Once the subject is known to be valid, every call can skip PCRE2's
 	// check: later calls start on character boundaries.
 	noCheck := utfCheck(re, s)
 	start, opts := 0, uint32(0)
 	for start <= len(s) && (n < 0 || len(all) < n) {
-		loc, err := in.match(len(s), start, opts|noCheck)
+		rc, err := in.exec(len(s), start, opts|noCheck)
 		if err != nil {
 			return all, err
 		}
 		noCheck = matchNoUTFCheck
-		if loc == nil {
+		if rc == 0 {
 			if opts == 0 {
 				break
 			}
@@ -278,6 +299,12 @@ func findAll[T subject](re *Regexp, s T, n int) (all [][]int, err error) {
 			opts = 0
 			continue
 		}
+		if len(buf) < width {
+			buf = make([]int, width*min(max(len(all), 8), 512))
+		}
+		loc := buf[:width:width]
+		buf = buf[width:]
+		in.offsets(rc, loc)
 		all = append(all, loc)
 		start, opts = loc[1], 0
 		if loc[0] == loc[1] {
@@ -313,6 +340,30 @@ func (re *Regexp) put(in *instance, err *error) {
 	}
 	in.unload()
 	re.pool.Put(in)
+}
+
+// offset converts ovector entry i of a match that set rc pairs to an
+// offset, or -1 if its group did not take part: it is unset, or past the
+// pairs the match set.
+func offset(v, unset uint64, i, rc int) int {
+	if v == unset || i >= 2*rc {
+		return -1
+	}
+	return int(v)
+}
+
+// matchResult maps the result of pcre2_match to the number of pairs set,
+// 0 for no match, or an error. A result of 0 from PCRE2 means the ovector
+// was too small; it never is, since the match data is sized from the
+// pattern, but then every pair is taken as set.
+func matchResult(in *instance, rc int32) (int, error) {
+	switch {
+	case rc > 0:
+		return int(rc), nil
+	case rc == 0:
+		return in.npair, nil
+	}
+	return 0, matchErr(in, rc)
 }
 
 // matchErr maps a negative pcre2_match result to an error. No match is
