@@ -82,14 +82,14 @@ all, err := re.FindAllStringIndex(subject, -1)    // [][]int byte offsets
 | `Compile(expr, opts...) (*Regexp, error)` | |
 | `MustCompile(expr, opts...) *Regexp` | Panics on error |
 
-**Matching.** Every method has a `string` and a `[]byte` form:
+**Matching.** Only `Match` and the index methods have `[]byte` forms:
 
-| Methods | Returns |
-|---|---|
-| `MatchString`, `Match` | `(bool, error)` |
-| `FindString`, `FindStringIndex`, `FindIndex` | The leftmost match |
-| `FindStringSubmatch`, `FindStringSubmatchIndex`, `FindSubmatchIndex` | The leftmost match with its groups |
-| `FindAllString`, `FindAllStringIndex`, `FindAllStringSubmatchIndex`, `FindAllSubmatchIndex` | Successive matches; `n < 0` means all |
+| `string` methods | `[]byte` methods | Returns |
+|---|---|---|
+| `MatchString` | `Match` | `(bool, error)` |
+| `FindString`, `FindStringIndex` | `FindIndex` | The leftmost match |
+| `FindStringSubmatch`, `FindStringSubmatchIndex` | `FindSubmatchIndex` | The leftmost match with its groups |
+| `FindAllString`, `FindAllStringIndex`, `FindAllStringSubmatchIndex` | `FindAllSubmatchIndex` | Successive matches; `n < 0` means all |
 
 **Groups:** `NumSubexp()`, `SubexpNames()`, `SubexpIndex(name)`. `String()` returns the source pattern.
 
@@ -111,7 +111,7 @@ all, err := re.FindAllStringIndex(subject, -1)    // [][]int byte offsets
 | `ErrMatchLimit`, `ErrDepthLimit`, `ErrHeapLimit`, `ErrNoMemory` | A match hit a limit or ran out of memory |
 | `*CompileError` | PCRE2 rejected the pattern; has `Offset`, `Code`, `Message` |
 | `*MatchError` | Any other PCRE2 match failure, such as invalid UTF-8 in the subject |
-| `*TrapError` | The Wasm module trapped. The instance is discarded and the `Regexp` stays usable. |
+| `*TrapError` | The Wasm module trapped. From a match method, the instance is discarded and the `Regexp` stays usable. `Compile` can also return it, and then there is no `Regexp`. |
 
 **Package values**
 
@@ -124,7 +124,7 @@ all, err := re.FindAllStringIndex(subject, -1)    // [][]int byte offsets
 ## Behaviour
 
 - **Offsets** are byte offsets, as in `regexp`.
-- **UTF-8.** Patterns and subjects are UTF-8 by default. Subjects are validated with Go's `utf8.Valid`, which is faster than PCRE2's own check. An invalid subject returns a `*MatchError` carrying PCRE2's error code and offset.
+- **UTF-8.** Patterns and subjects are UTF-8 by default. Subjects are validated with Go's `utf8.Valid`, which is faster than PCRE2's own check. An invalid subject returns a `*MatchError` carrying PCRE2's error code and message.
 - **`InvalidUTF()`** makes invalid sequences fail to match instead. It has a cost: PCRE2 then re-validates the rest of the subject on every internal match call, so `FindAll` becomes quadratic on long inputs.
 - **`Bytes()`** matches raw bytes.
 - **Character classes.** `\d`, `\w` and `\s` are ASCII unless `UCP()` is set, as in `regexp`.
@@ -174,7 +174,11 @@ What the table shows:
 
 - **No imports.** The Wasm module has none; the build fails if PCRE2 ever needs one. Matching has no way to reach files, the network, clocks or the process, whatever the pattern or subject.
 - **Bounds-checked memory.** wasm2go keeps linear memory as one Go slice and bounds-checks every access, including in `-unsafe` mode. An out-of-range access panics. The wrapper turns that panic into a `*TrapError` and discards the instance. See wasm2go's [SECURITY.md](https://github.com/ncruces/wasm2go/blob/main/SECURITY.md).
-- **Pinned, reproducible inputs.** The PCRE2 tag is checked against a commit hash. wasi-sdk, the Go image and wasm2go are pinned versions, and CI fails if regenerating the code changes it. `internal/wasm/versions.go` records the `.wasm` SHA-256.
+- **Pinned sources, checked output.** The source inputs are pinned:
+  - PCRE2's tag is checked against a commit hash;
+  - wasm2go is a fixed module version, verified by the Go checksum database.
+
+  The build environment is not fully pinned. The `wasi-sdk-25` and `golang:1.26-trixie` images are referenced by tag rather than digest, and the apt tools in the build stage (`git`, `wabt`) are unpinned. So the build is not reproducible by construction. CI rebuilds on every run and fails if the generated code differs from what is committed, which catches drift; so far every run has produced byte-identical output. `internal/wasm/versions.go` records the `.wasm` SHA-256.
 - **No dependencies** outside the standard library. The benchmark module, which needs regexp2, is a separate Go module.
 
 ## How it is built
