@@ -11,7 +11,7 @@ RUN apt-get update \
   && apt-get install -y --no-install-recommends ca-certificates git wabt \
   && rm -rf /var/lib/apt/lists/*
 
-COPY buildtools/wasm/versions.env buildtools/wasm/exports.txt /build/
+COPY buildtools/wasm/versions.env buildtools/wasm/exports.txt buildtools/wasm/imports.txt buildtools/wasm/callout.c /build/
 
 # Fetch the pinned release and refuse to build if the tag moved.
 RUN . /build/versions.env \
@@ -34,20 +34,24 @@ RUN cmake -S /pcre2 -B /pcre2/build \
   && cmake --build /pcre2/build -j"$(nproc)"
 
 # A reactor module: no main, _initialize runs libc constructors.
+# callout.c adds the callout import and the export that installs it.
 RUN exports="$(sed 's/^/-Wl,--export=/' /build/exports.txt | tr '\n' ' ')" \
-  && $CC -O2 -mexec-model=reactor \
+  && $CC -O2 -mexec-model=reactor -I/pcre2/build/interface \
     -o /build/pcre2.wasm \
-    /pcre2/build/libpcre2-8.a \
+    /build/callout.c /pcre2/build/libpcre2-8.a \
     -Wl,-z,stack-size=1048576 \
     $exports
 
-# The module must not import anything: no WASI, no host functions.
-# A Regexp then has no way to reach files, clocks, the network or the
-# process, whatever the pattern or subject.
-RUN imports="$(wasm-objdump -j Import -x /build/pcre2.wasm | grep -c ' <- ' || true)" \
-  && if [ "$imports" != "0" ]; then \
+# The module may import only what imports.txt lists: the callout hook,
+# which the Go wrapper implements by calling the function passed to
+# OnCallout. No WASI, no other host functions, so a Regexp has no way to
+# reach files, clocks, the network or the process, whatever the pattern
+# or subject.
+RUN wasm-objdump -j Import -x /build/pcre2.wasm \
+  | sed -n 's/.* <- \([^ ]*\).*/\1/p' | sort > /build/imports.got \
+  && if ! sort /build/imports.txt | cmp -s - /build/imports.got; then \
        wasm-objdump -j Import -x /build/pcre2.wasm; \
-       echo "pcre2.wasm has $imports imports; expected none" >&2; exit 1; \
+       echo "pcre2.wasm imports differ from imports.txt" >&2; exit 1; \
      fi \
   && sha256sum /build/pcre2.wasm
 

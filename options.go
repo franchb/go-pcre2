@@ -2,6 +2,7 @@ package pcre2
 
 // Compile options, from pcre2.h.
 const (
+	optAutoCallout     = 0x00000004
 	optCaseless        = 0x00000008
 	optDotAll          = 0x00000020
 	optExtended        = 0x00000080
@@ -17,6 +18,7 @@ type config struct {
 	depthLimit uint32
 	heapLimit  uint32 // KiB
 	noJIT      bool
+	callout    CalloutFunc
 }
 
 func defaultConfig() config {
@@ -69,6 +71,16 @@ func DepthLimit(n uint32) Option { return func(c *config) { c.depthLimit = n } }
 // HeapLimit caps the heap memory, in KiB, that one match may use to hold
 // backtracking information. Exceeding it returns ErrHeapLimit.
 func HeapLimit(kib uint32) Option { return func(c *config) { c.heapLimit = kib } }
+
+// OnCallout calls fn at each callout point in the pattern: (?C), (?Cn) and
+// (?C"text"), and every item with AutoCallout. Without it, callouts in the
+// pattern are ignored. See CalloutFunc.
+func OnCallout(fn CalloutFunc) Option { return func(c *config) { c.callout = fn } }
+
+// AutoCallout inserts a callout, numbered 255, before every item in the
+// pattern, which is useful for tracing how a pattern matches. It has no
+// effect without OnCallout.
+func AutoCallout() Option { return func(c *config) { c.flags |= optAutoCallout } }
 
 // NoJIT makes the cgo backend use PCRE2's interpreter instead of its JIT.
 // It exists to measure what the JIT contributes; the wasm2go backend never

@@ -29,7 +29,6 @@ all, err := re.FindAllString("f(a, g(b, c)) + (d)", -1)
 - [Versions and releases](#versions-and-releases)
 - [Development](#development)
 - [History](#history)
-- [Roadmap](#roadmap)
 - [License](#license)
 
 ## Install
@@ -50,14 +49,13 @@ Go's `regexp` is RE2: linear-time and safe, but with no lookaround or backrefere
 | Whole-pattern recursion | `(?R)` |
 | Subroutine calls | `(?1)`, `(?&name)` |
 | Branch reset | `(?\|a\|b)` |
+| Callouts to Go | `(?C1)`, `(?C"text")`, with `OnCallout` |
 
 Pick the least powerful engine that fits your patterns:
 
 1. **Go's `regexp`**, when RE2 syntax is enough. It is linear-time, so hostile input can't make it backtrack.
 2. **regexp2 or go-pcre2**, when you need lookaround or backreferences. They perform about the same on simple patterns (see [Performance](#performance)). regexp2 has a timeout; go-pcre2 has PCRE2's match, depth and heap limits.
 3. **go-pcre2**, when a pattern needs PCRE2 itself: one of the features in the table, or exact PCRE2 semantics for a rule set written against PCRE.
-
-Callouts `(?C…)` are not supported; see the [roadmap](#roadmap).
 
 ## API
 
@@ -102,6 +100,8 @@ all, err := re.FindAllStringIndex(subject, -1)    // [][]int byte offsets
 | `Bytes()` | Match raw bytes instead of UTF-8 |
 | `InvalidUTF()` | Allow invalid UTF-8 in subjects; read [the cost](#behaviour) first |
 | `MatchLimit(n)`, `DepthLimit(n)`, `HeapLimit(kib)` | Bound backtracking |
+| `OnCallout(fn)` | Call `fn` at each callout point; see [Callouts](#callouts) |
+| `AutoCallout()` | Insert a callout, numbered 255, before every item, for tracing |
 | `NoJIT()` | cgo backend only: use the interpreter, for benchmarking |
 
 **Errors**
@@ -120,6 +120,38 @@ all, err := re.FindAllStringIndex(subject, -1)    // [][]int byte offsets
 | `Version` | The PCRE2 release in use, for example `"10.49"` |
 | `Backend` | `"wasm2go"`, or `"cgo"` with `-tags pcre2_cgo` |
 | `JIT` | cgo backend only: whether the linked PCRE2 has the JIT |
+| `Fail` | Returned by a `CalloutFunc` to backtrack at that point |
+
+### Callouts
+
+A callout, `(?C1)` or `(?C"text")` in the pattern, calls back into Go during the match. The function sees where the match is and which groups have been captured so far. What it returns decides how matching goes on:
+
+- `nil`: go on matching.
+- `pcre2.Fail`: fail at this point and backtrack, as if a lookahead had failed.
+- any other error: abandon the match. The match method returns that error unchanged.
+
+A callout lets a pattern check something a regex can't express, such as a number range:
+
+```go
+// Rejects octets above 255; PCRE2 backtracks and keeps looking.
+re := pcre2.MustCompile(`\b(?:(\d{1,3})(?C1)\.){3}(\d{1,3})(?C1)\b`,
+	pcre2.OnCallout(func(c *pcre2.Callout) error {
+		start, end := c.Group(c.CaptureLast)
+		if n, _ := strconv.Atoi(c.Subject[start:end]); n > 255 {
+			return pcre2.Fail
+		}
+		return nil
+	}))
+all, err := re.FindAllString("10.0.0.1 999.1.1.1 192.168.1.300 8.8.8.8", -1)
+// [10.0.0.1 8.8.8.8]
+```
+
+- **The `Callout`** has `Number`, `String`, `Subject`, `StartMatch`, `Position`, `PatternPosition`, `NextItemLength`, `CaptureTop`, `CaptureLast`, `Mark`, and `Group(i)` for the groups captured so far. It is reused between calls, so don't keep it after the function returns.
+- **`NewStart` and `Backtracked`** are only reported by the interpreter. The JIT leaves them false, so with the cgo backend they need `NoJIT()`.
+- **Concurrency.** The function runs on every goroutine that matches the pattern, so it may run concurrently with itself.
+- **Panics.** If the function panics, the panic is recovered before it can unwind through PCRE2, the match is abandoned, and the panic is raised again in the caller. The `Regexp` stays usable.
+- **Patterns without `OnCallout`.** Callouts in them are ignored, as in PCRE2.
+- **Skipped callouts.** PCRE2's optimizations can skip callouts. For example, auto-possessification compiles `a+[bc]` as `a++[bc]`, so the callouts for backtracking into `a+` never happen. See "Missing callouts" in [pcre2callout(3)](https://www.pcre.org/current/doc/html/pcre2callout.html).
 
 ## Behaviour
 
@@ -173,7 +205,7 @@ What the table shows:
 
 ## Security model
 
-- **No imports.** The Wasm module has none; the build fails if PCRE2 ever needs one. Matching has no way to reach files, the network, clocks or the process, whatever the pattern or subject.
+- **One import, and it only calls your code.** The Wasm module imports exactly one function, `gopcre2.callout`, and the build fails if the imports ever differ from [`imports.txt`](buildtools/wasm/imports.txt). The Go side of that import calls the function you passed to `OnCallout`, and nothing else; without `OnCallout` it is never installed. There is no WASI and no other host function, so matching has no way to reach files, the network, clocks or the process, whatever the pattern or subject. Up to v0.49.0 the module had no imports at all. Callouts were the one feature worth giving that up for, because the import grants nothing beyond code the caller already runs.
 - **Bounds-checked memory.** wasm2go keeps linear memory as one Go slice and bounds-checks every access, including in `-unsafe` mode. An out-of-range access panics. The wrapper turns that panic into a `*TrapError` and discards the instance. See wasm2go's [SECURITY.md](https://github.com/ncruces/wasm2go/blob/main/SECURITY.md).
 - **Pinned sources, checked output.** The source inputs are pinned:
   - PCRE2's tag is checked against a commit hash;
@@ -188,8 +220,8 @@ What the table shows:
 
 1. Clone PCRE2 at the tag in [`versions.env`](buildtools/wasm/versions.env), and check that the tag still points at the pinned commit.
 2. Build the 8-bit library with wasi-sdk 25, JIT off. PCRE2's JIT has no WebAssembly backend.
-3. Link a reactor module that exports only its memory and the functions in [`exports.txt`](buildtools/wasm/exports.txt).
-4. Fail the build if the module imports anything.
+3. Link a reactor module from the library and [`callout.c`](buildtools/wasm/callout.c), which adds the callout import and asserts the callout block's layout. The module exports only its memory and the functions in [`exports.txt`](buildtools/wasm/exports.txt).
+4. Fail the build if the module's imports differ from [`imports.txt`](buildtools/wasm/imports.txt).
 5. Translate the module to Go with the pinned wasm2go version and its `-unsafe` option, and record the inputs and the `.wasm` SHA-256 in `internal/wasm/versions.go`.
 
 With `-unsafe`, the generated loads and stores do one explicit bounds check on the last byte of each access, then an unaligned `unsafe.Pointer` access. That is about 2.5× faster than the default byte-by-byte code. Big-endian and strict-alignment targets fall back to the default path.
@@ -249,10 +281,6 @@ All of this was built and measured on 2026-10-28. The first working build ran Fi
 Later, [#7](https://github.com/franchb/go-pcre2/pull/7) stopped allocating offsets a method doesn't return, which took the price pattern to 1.75× regexp2.
 
 The [blog post update](https://franchb.com/posts/pcre-regex-in-go-2026/#update-so-i-built-it) tells the whole story. [docs/BENCHMARKS.md](docs/BENCHMARKS.md) has the numbers at each step.
-
-## Roadmap
-
-- **Callouts.** They need a host import, so they mean a deliberate decision about the no-imports rule.
 
 ## License
 
