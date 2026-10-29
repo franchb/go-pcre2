@@ -45,6 +45,18 @@ static uint32_t gp_has_jit(void) {
 	return jit;
 }
 
+// Callouts go to goCallout (callout_cgo.go) with the cgo.Handle of the
+// instance's callouts as data.
+extern int goCallout(pcre2_callout_block_8 *block, uintptr_t handle);
+
+static int gp_callout(pcre2_callout_block_8 *block, void *data) {
+	return goCallout(block, (uintptr_t)data);
+}
+
+static int gp_set_callout(pcre2_match_context_8 *mctx, uintptr_t handle) {
+	return pcre2_set_callout_8(mctx, gp_callout, (void *)handle);
+}
+
 static void gp_free(pcre2_code_8 *code, pcre2_match_data_8 *md, pcre2_match_context_8 *mctx) {
 	pcre2_match_context_free_8(mctx);
 	pcre2_match_data_free_8(md);
@@ -55,6 +67,7 @@ import "C"
 
 import (
 	"runtime"
+	"runtime/cgo"
 	"strings"
 	"unsafe"
 )
@@ -91,12 +104,15 @@ type instance struct {
 	ovec  *C.size_t
 	npair int
 	subj  *C.uint8_t // the current subject, in Go memory, during a call
+
+	co *callouts // nil unless the pattern has a CalloutFunc
 }
 
 type handles struct {
 	code *C.pcre2_code_8
 	md   *C.pcre2_match_data_8
 	mctx *C.pcre2_match_context_8
+	co   cgo.Handle // 0 if none
 }
 
 func (re *Regexp) newInstance() (*instance, error) {
@@ -122,11 +138,19 @@ func (re *Regexp) newInstance() (*instance, error) {
 	in.ovec = C.pcre2_get_ovector_pointer_8(in.md)
 	in.npair = int(C.pcre2_get_ovector_count_8(in.md))
 
-	if c := re.cfg; c.matchLimit != 0 || c.depthLimit != 0 || c.heapLimit != 0 {
+	var co cgo.Handle
+	if c := re.cfg; c.matchLimit != 0 || c.depthLimit != 0 || c.heapLimit != 0 || c.callout != nil {
 		in.mctx = C.pcre2_match_context_create_8(nil)
 		if in.mctx == nil {
 			C.gp_free(code, in.md, nil)
 			return nil, ErrNoMemory
+		}
+		if c.callout != nil {
+			// The handle refers to the callouts, not the instance, so it
+			// does not keep the instance from being collected.
+			in.co = &callouts{fn: c.callout}
+			co = cgo.NewHandle(in.co)
+			C.gp_set_callout(in.mctx, C.uintptr_t(co))
 		}
 		if c.matchLimit != 0 {
 			C.pcre2_set_match_limit_8(in.mctx, C.uint32_t(c.matchLimit))
@@ -139,7 +163,12 @@ func (re *Regexp) newInstance() (*instance, error) {
 		}
 	}
 
-	runtime.AddCleanup(in, func(h handles) { C.gp_free(h.code, h.md, h.mctx) }, handles{in.code, in.md, in.mctx})
+	runtime.AddCleanup(in, func(h handles) {
+		C.gp_free(h.code, h.md, h.mctx)
+		if h.co != 0 {
+			h.co.Delete()
+		}
+	}, handles{in.code, in.md, in.mctx, co})
 	return in, nil
 }
 
@@ -158,10 +187,18 @@ func load[T subject](in *instance, s T) {
 		p = unsafe.StringData(str)
 	}
 	in.subj = (*C.uint8_t)(unsafe.Pointer(p))
+	if in.co != nil {
+		in.co.subject = subjectString(s)
+	}
 }
 
-// unload drops the reference to the last subject before pooling.
-func (in *instance) unload() { in.subj = nil }
+// unload drops the references to the last subject before pooling.
+func (in *instance) unload() {
+	in.subj = nil
+	if in.co != nil {
+		in.co.subject = ""
+	}
+}
 
 func errorMessage(code int32) string {
 	var buf [256]byte

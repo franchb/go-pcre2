@@ -3,6 +3,7 @@
 package pcre2
 
 import (
+	"bytes"
 	"encoding/binary"
 
 	"github.com/franchb/go-pcre2/internal/wasm"
@@ -29,7 +30,16 @@ type instance struct {
 
 	subj    int32 // subject buffer
 	subjCap int32
+
+	co *callouts // nil unless the pattern has a CalloutFunc
 }
+
+// host implements the module's one import, gopcre2.callout, which
+// buildtools/wasm/callout.c calls for each callout. It is only installed
+// on match contexts of patterns with a CalloutFunc.
+type host struct{ in *instance }
+
+func (h *host) Xcallout(block int32) int32 { return h.in.callout(block) }
 
 func (re *Regexp) newInstance() (in *instance, err error) {
 	defer func() {
@@ -38,9 +48,11 @@ func (re *Regexp) newInstance() (in *instance, err error) {
 		}
 	}()
 
-	mod := wasm.New()
+	h := &host{}
+	mod := wasm.New(h)
 	mod.X_initialize()
 	in = &instance{mod: mod}
+	h.in = in
 
 	// pcre2_compile copies the pattern, so the buffer is freed right after.
 	pat := in.alloc(len(re.expr) + 8)
@@ -62,10 +74,14 @@ func (re *Regexp) newInstance() (in *instance, err error) {
 	in.ovec = mod.Xpcre2_get_ovector_pointer_8(in.md)
 	in.npair = int(uint32(mod.Xpcre2_get_ovector_count_8(in.md)))
 
-	if c := re.cfg; c.matchLimit != 0 || c.depthLimit != 0 || c.heapLimit != 0 {
+	if c := re.cfg; c.matchLimit != 0 || c.depthLimit != 0 || c.heapLimit != 0 || c.callout != nil {
 		in.mctx = mod.Xpcre2_match_context_create_8(0)
 		if in.mctx == 0 {
 			return nil, ErrNoMemory
+		}
+		if c.callout != nil {
+			in.co = &callouts{fn: c.callout}
+			mod.Xgopcre2_set_callout(in.mctx)
 		}
 		if c.matchLimit != 0 {
 			mod.Xpcre2_set_match_limit_8(in.mctx, int32(c.matchLimit))
@@ -103,10 +119,63 @@ func load[T subject](in *instance, s T) {
 		in.subj, in.subjCap = in.alloc(size), int32(size)
 	}
 	copy(in.mem()[in.subj:], s)
+	if in.co != nil {
+		in.co.subject = subjectString(s)
+	}
 }
 
-// unload is a no-op: the subject was copied into linear memory.
-func (in *instance) unload() {}
+// unload drops the reference callouts keep to the last subject. The
+// subject itself was copied into linear memory.
+func (in *instance) unload() {
+	if in.co != nil {
+		in.co.subject = ""
+	}
+}
+
+// callout fills in the Callout from the pcre2_callout_block at b and runs
+// the CalloutFunc. Offsets are those asserted in callout.c.
+func (in *instance) callout(b int32) int32 {
+	co := in.co
+	if co == nil {
+		return calloutContinue
+	}
+	mem := in.mem()
+	u32 := func(off int32) uint32 { return binary.LittleEndian.Uint32(mem[b+off:]) }
+
+	c := &co.c
+	c.Number = int(u32(4))
+	c.CaptureTop = int(u32(8))
+	c.CaptureLast = int(u32(12))
+	c.StartMatch = int(u32(32))
+	c.Position = int(u32(36))
+	c.PatternPosition = int(u32(40))
+	c.NextItemLength = int(u32(44))
+	flags := u32(60)
+	c.NewStart = flags&calloutStartMatch != 0
+	c.Backtracked = flags&calloutBacktrack != 0
+	c.Subject = co.subject
+
+	c.String = ""
+	if p := u32(56); p != 0 {
+		n := u32(52)
+		c.String = co.str(int(u32(48)), func() string { return string(mem[p : p+n]) })
+	}
+	c.Mark = ""
+	if p := u32(20); p != 0 {
+		name := mem[p:]
+		c.Mark = string(name[:bytes.IndexByte(name, 0)])
+	}
+	c.ovec = c.ovec[:0]
+	ovec := u32(16)
+	for i := range uint32(2 * c.CaptureTop) {
+		off := -1
+		if v := binary.LittleEndian.Uint32(mem[ovec+4*i:]); v != unset {
+			off = int(v)
+		}
+		c.ovec = append(c.ovec, off)
+	}
+	return co.call()
+}
 
 func (in *instance) errorMessage(code int32) string {
 	const size = 256

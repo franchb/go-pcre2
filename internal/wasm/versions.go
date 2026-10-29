@@ -7,5 +7,5 @@ const (
 	PCRE2Version   = "10.49"
 	PCRE2Commit    = "6f9d7c1373262c541324a16a358785b33ef116cf"
 	Wasm2GoVersion = "v0.4.19"
-	WasmSHA256     = "8801357d4ba3409978019f7bd0a8d9f603e49db4de413b014cce775a5cfb423b"
+	WasmSHA256     = "02a5a7a6ce21d63dd52ba3a334418d10540d99a38c454d0d3d393d6e42abdfe2"
 )
