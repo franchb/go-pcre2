@@ -184,23 +184,24 @@ PCRE2's defaults are a match limit of 10,000,000 and a heap limit of 20,000,000 
 
 [docs/BENCHMARKS.md](docs/BENCHMARKS.md) has the method and full tables. Every engine runs back to back on one CI runner, against native PCRE2 built from the same commit.
 
-`v0.49.0`, 64 KiB corpus, medians of 5, AMD EPYC 7763, MB/s:
+`main` after [#7](https://github.com/franchb/go-pcre2/pull/7), 64 KiB corpus, medians of 5, AMD EPYC 7763, MB/s:
 
 | pattern | Go `regexp` | regexp2 | **go-pcre2** | PCRE2 interpreter (cgo) | PCRE2 JIT (cgo) |
 |---|---|---|---|---|---|
-| `\$\d+\.\d\d` | 156 | 118 | **190** | 296 | 457 |
-| `\b(\w+) \1\b` | n/a | 6.8 | **13.4** | 30.1 | 140 |
-| `(?<=\$)\d+\.\d\d` | n/a | 53.7 | **51.3** | 117 | 318 |
-| `[\w.]+@[\w.]+\.com` | 20.3 | 83.5 | **17.7** | 44.8 | 273 |
-| `needle`, no match | 63,140 | 65,698 | **3,556** | 29,641 | 15,708 |
-| small `MatchString`, ns | 119 | 176 | **323** | 209 | 154 |
+| `\$\d+\.\d\d` | 152 | 122 | **214** | 392 | 606 |
+| `\b(\w+) \1\b` | n/a | 7.2 | **13.5** | 29.9 | 151 |
+| `(?<=\$)\d+\.\d\d` | n/a | 55.9 | **52.8** | 122 | 387 |
+| `[\w.]+@[\w.]+\.com` | 20.0 | 87.6 | **18.0** | 41.8 | 326 |
+| `needle`, no match | 63,252 | 65,715 | **3,557** | 29,926 | 15,730 |
+| small `MatchString`, ns | 121 | 182 | **275** | 159 | 109 |
 
 What the table shows:
 
 - **Against regexp2:** go-pcre2 is faster on simple patterns and backreferences, ties on lookbehind, and loses on patterns like the email one.
-- **Cost of translation:** against the same PCRE2 interpreter compiled natively, wasm2go costs 1.5–2.5× on the four matching patterns.
-- **The no-match literal search is the exception.** There the native interpreter is 8.3× faster than wasm2go, and even beats the JIT.
-- **The JIT** adds a further 1.5–6.1× on the matching patterns.
+- **Cost of translation:** against the same PCRE2 interpreter compiled natively, wasm2go costs 1.8–2.3× on the four matching patterns.
+- **The no-match literal search is the exception.** There the native interpreter is 8.4× faster than wasm2go, and even beats the JIT.
+- **The JIT** adds a further 1.5–7.8× on the matching patterns.
+- **Small subjects:** a `MatchString` on a 10-byte subject makes no allocations. Most of its time is `pcre2_match` itself, not the call into the module.
 
 ## Security model
 
@@ -276,6 +277,8 @@ All of this was built and measured on 2026-10-28. The first working build ran Fi
 1. **The first bug was mine.** I had made `PCRE2_MATCH_INVALID_UTF` the default. PCRE2's source says that option "forces a check, overriding the setting of PCRE2_NO_UTF_CHECK", so every call re-validated the subject and `FindAll` went quadratic. Validating once fixed it: [#1](https://github.com/franchb/go-pcre2/pull/1).
 2. **Validating UTF-8 in Go**, instead of in PCRE2: [#4](https://github.com/franchb/go-pcre2/pull/4).
 3. **wasm2go's `-unsafe` option:** about 2.5× everywhere ([#2](https://github.com/franchb/go-pcre2/pull/2)).
+
+Later, [#7](https://github.com/franchb/go-pcre2/pull/7) stopped allocating offsets a method doesn't return, which took the price pattern to 1.75× regexp2.
 
 The [blog post update](https://franchb.com/posts/pcre-regex-in-go-2026/#update-so-i-built-it) tells the whole story. [docs/BENCHMARKS.md](docs/BENCHMARKS.md) has the numbers at each step.
 
