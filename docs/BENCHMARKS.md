@@ -6,6 +6,27 @@ Numbers come from CI, not from a developer machine. The `cgo` job in [`ci.yml`](
 - **Engines compared:** Go's `regexp`, `dlclark/regexp2` v2.11.0, go-pcre2 on wasm2go (the default), and native PCRE2 10.49 through cgo, with the JIT on and off (`NoJIT()`).
 - **Comparability:** GitHub's runners vary (EPYC 7763, 9V74 and 9V45 have all appeared), roughly 2× apart. Compare engines within one run, not across runs.
 
+## After #7 (commit 1b011a1, AMD EPYC 7763, 4 vCPU)
+
+[#7](https://github.com/franchb/go-pcre2/pull/7) stopped the wrapper from allocating offsets that a method doesn't return. This changed both backends.
+
+Throughput in MB/s; the "small" row is ns per call.
+
+| pattern | stdlib | regexp2 | go-pcre2 (wasm2go) | PCRE2 interpreter (cgo) | PCRE2 JIT (cgo) |
+|---|---|---|---|---|---|
+| `[\w.]+@[\w.]+\.com` | 20.0 | 87.6 | 18.0 | 41.8 | 326 |
+| `\$\d+\.\d\d` | 152 | 122 | 214 | 392 | 606 |
+| `(?<=\$)\d+\.\d\d` | n/a | 55.9 | 52.8 | 122 | 387 |
+| `\b(\w+) \1\b` | n/a | 7.17 | 13.5 | 29.9 | 151 |
+| `needle`, no match | 63,252 | 65,715 | 3,557 | 29,926 | 15,730 |
+| small `MatchString`, ns | 121 | 182 | 275 | 159 | 109 |
+
+What changed against v0.49.0. Both runs were on an EPYC 7763, but on different runners, so small differences are noise:
+- **Small `MatchString`:** 323 → 275 ns on wasm2go, now with 0 allocations. On cgo the JIT went from 154 to 109 ns and the interpreter from 209 to 159 ns. The saving is about 50 ns on both backends, which is a larger share of the shorter cgo call.
+- **FindAll** allocates 19 times per call instead of about one per match (1,013 on this corpus). Price went from 190 to 214 MB/s on wasm2go and from 457 to 606 MB/s on the JIT.
+- **Translation cost** is now 1.8× to 2.3× against the native interpreter on the four matching patterns, and 8.4× on the `needle` search.
+- **Where the small call goes.** A profile of the small call on wasm2go shows that most of it is now `pcre2_match` itself. Entering the module is a plain Go method call.
+
 ## v0.49.0 (commit d14af3c, AMD EPYC 7763, 4 vCPU)
 
 Throughput in MB/s; the "small" row is ns per call.
@@ -35,5 +56,6 @@ How each change moved go-pcre2 relative to regexp2 in the same run:
 | validate the subject once per FindAll (23a5ca8) | 0.84 |
 | UTF-8 validation in Go (#4, 46074f7) | 1.00 |
 | wasm2go `-unsafe` (#2), measured on main at d14af3c | 1.61 |
+| offsets read only as needed, chunked FindAll results (#7, 1b011a1) | 1.75 |
 
 The raw benchmark output for each run is in the `bench` artifact of the run.
