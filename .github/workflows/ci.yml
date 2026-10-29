@@ -65,6 +65,23 @@ jobs:
       - name: Test
         run: go test -race ./...
 
+      # Short fuzzing on every run; fuzz.yml runs it for longer nightly.
+      # Each run starts with every seed, PCRE2's included, which -race
+      # skips above. See docs/FUZZING.md.
+      - name: Fuzz, 30 s per target
+        run: |
+          for target in FuzzCompile FuzzMatch FuzzCallout; do
+            go test -run '^$' -fuzz "^${target}\$" -fuzztime 30s .
+          done
+
+      - name: Keep failing fuzz inputs
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: fuzz-failures-wasm2go
+          path: testdata/fuzz
+          if-no-files-found: ignore
+
       - name: Build without cgo for other platforms
         run: |
           for target in linux/arm64 darwin/arm64 windows/amd64 linux/riscv64; do
@@ -97,6 +114,18 @@ jobs:
 
       - name: Test
         run: go test -race -tags pcre2_cgo ./...
+
+      # wasm2go against native PCRE2 with the JIT off, from the same commit.
+      - name: Differential fuzz, 60 s
+        run: go test -tags pcre2_cgo -run '^$' -fuzz '^FuzzDifferential$' -fuzztime 60s .
+
+      - name: Keep failing fuzz inputs
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: fuzz-failures-cgo
+          path: testdata/fuzz
+          if-no-files-found: ignore
 
       - name: Benchmarks, both backends on one runner
         working-directory: bench
