@@ -2,8 +2,9 @@
 //
 // PCRE2 is compiled to WebAssembly and translated to Go by wasm2go, so the
 // library builds with CGO_ENABLED=0 and cross-compiles like any Go package.
-// The module has no imports: matching cannot reach files, the network, the
-// clock or the process.
+// The module's only import is the callout hook, which calls the function
+// passed to OnCallout and nothing else: matching cannot reach files, the
+// network, the clock or the process.
 //
 // Patterns use PCRE2 syntax, including features Go's regexp and
 // dlclark/regexp2 lack: \K, recursion (?R), subroutine calls (?1) and
@@ -332,9 +333,15 @@ func (re *Regexp) get() (*instance, error) {
 
 // put returns in to the pool, unless the call trapped. A trap is turned
 // into a *TrapError and the instance, whose memory may be inconsistent, is
-// dropped.
+// dropped. A panic from a CalloutFunc was recovered before it reached
+// PCRE2, so the instance is intact: it is pooled and the panic goes on.
 func (re *Regexp) put(in *instance, err *error) {
 	if v := recover(); v != nil {
+		if p, ok := v.(calloutPanic); ok {
+			in.unload()
+			re.pool.Put(in)
+			panic(p.v)
+		}
 		*err = trapError(v)
 		return
 	}
@@ -357,6 +364,11 @@ func offset(v, unset uint64, i, rc int) int {
 // was too small; it never is, since the match data is sized from the
 // pattern, but then every pair is taken as set.
 func matchResult(in *instance, rc int32) (int, error) {
+	if in.co != nil {
+		if err := in.co.finish(rc); err != nil {
+			return 0, err
+		}
+	}
 	switch {
 	case rc > 0:
 		return int(rc), nil
